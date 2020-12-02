@@ -153,6 +153,8 @@ def main():
     parser.add_argument('--output_root_path', type=str, default='.', help='path to output root of new json file')
     parser.add_argument('--output_prefix', type=str, default='', help='prefix of json annotaion file')
     parser.add_argument('--ext', type=str, default='', help='additional extension of annotation file')
+    parser.add_argument('--extract_num_from_imgid', action="store_true",
+                        help='Extract image number from the image filename')
     args = parser.parse_args()
     label2id = get_label2id(labels_path=args.labels)
 
