@@ -1,4 +1,5 @@
 import os
+import ntpath
 import argparse
 import json
 import xml.etree.ElementTree as ET
@@ -32,15 +33,32 @@ def get_annpaths(ann_dir_path: str = None,
     ann_paths = [os.path.join(ann_dir_path, aid+ext_with_dot) for aid in ann_ids]
     return ann_paths
 
-
-def get_image_info(annotation_root, extract_num_from_imgid=True):
+ 
+def get_image_info(annotation_root, extract_num_from_imgid=True, output_root_path=None):
     path = annotation_root.findtext('path')
+
     if path is None:
         filename = annotation_root.findtext('filename')
     else:
         filename = os.path.basename(path)
+
+    if output_root_path is not None:
+        if path.find('\\') != -1:
+            img_name = ntpath.basename(path)
+        else:
+            img_name = os.path.basename(path)
+        path = os.path.join(output_root_path, img_name)
+        filename = os.path.basename(path)
+
     img_name = os.path.basename(filename)
-    img_id = os.path.splitext(img_name)[0]
+    folder_name = annotation_root.findtext('folder')
+    if img_name == 'gt_rgb_image.png':
+        img_id = os.path.splitext(folder_name)[0]
+    else:
+        img_id = img_name.split('.')[0]
+        folder_name = img_id
+        filename = 'gt_rgb_image.png'
+
     if extract_num_from_imgid and isinstance(img_id, str):
         img_id = int(re.findall(r'\d+', img_id)[0])
 
@@ -49,7 +67,7 @@ def get_image_info(annotation_root, extract_num_from_imgid=True):
     height = int(size.findtext('height'))
 
     image_info = {
-        'file_name': filename,
+        'file_name': os.path.join(folder_name,filename),
         'height': height,
         'width': width,
         'id': img_id
@@ -62,10 +80,10 @@ def get_coco_annotation_from_obj(obj, label2id):
     assert label in label2id, f"Error: {label} is not in label2id !"
     category_id = label2id[label]
     bndbox = obj.find('bndbox')
-    xmin = int(bndbox.findtext('xmin')) - 1
-    ymin = int(bndbox.findtext('ymin')) - 1
-    xmax = int(bndbox.findtext('xmax'))
-    ymax = int(bndbox.findtext('ymax'))
+    xmin = int(float(bndbox.findtext('xmin')) - 1)
+    ymin = int(float(bndbox.findtext('ymin')) - 1)
+    xmax = int(float(bndbox.findtext('xmax')))
+    ymax = int(float(bndbox.findtext('ymax')))
     assert xmax > xmin and ymax > ymin, f"Box size error !: (xmin, ymin, xmax, ymax): {xmin, ymin, xmax, ymax}"
     o_width = xmax - xmin
     o_height = ymax - ymin
@@ -83,7 +101,9 @@ def get_coco_annotation_from_obj(obj, label2id):
 def convert_xmls_to_cocojson(annotation_paths: List[str],
                              label2id: Dict[str, int],
                              output_jsonpath: str,
-                             extract_num_from_imgid: bool = True):
+                             output_root_path: str,
+                             extract_num_from_imgid: bool = True,
+                             ):
     output_json_dict = {
         "images": [],
         "type": "instances",
@@ -98,7 +118,8 @@ def convert_xmls_to_cocojson(annotation_paths: List[str],
         ann_root = ann_tree.getroot()
 
         img_info = get_image_info(annotation_root=ann_root,
-                                  extract_num_from_imgid=extract_num_from_imgid)
+                                  extract_num_from_imgid=extract_num_from_imgid,
+                                  output_root_path=output_root_path)
         img_id = img_info['id']
         output_json_dict['images'].append(img_info)
 
@@ -129,22 +150,38 @@ def main():
     parser.add_argument('--labels', type=str, default=None,
                         help='path to label list.')
     parser.add_argument('--output', type=str, default='output.json', help='path to output json file')
+    parser.add_argument('--output_root_path', type=str, default='.', help='path to output root of new json file')
+    parser.add_argument('--output_prefix', type=str, default='', help='prefix of json annotaion file')
     parser.add_argument('--ext', type=str, default='', help='additional extension of annotation file')
     args = parser.parse_args()
     label2id = get_label2id(labels_path=args.labels)
-    ann_paths = get_annpaths(
+
+    train_ann_paths = get_annpaths(
         ann_dir_path=args.ann_dir,
-        ann_ids_path=args.ann_ids,
+        ann_ids_path=os.path.join(args.ann_ids, 'train.txt'),
+        ext=args.ext,
+        annpaths_list_path=args.ann_paths_list
+    )
+    valid_ann_paths = get_annpaths(
+        ann_dir_path=args.ann_dir,
+        ann_ids_path=os.path.join(args.ann_ids, 'valid.txt'),
         ext=args.ext,
         annpaths_list_path=args.ann_paths_list
     )
     convert_xmls_to_cocojson(
-        annotation_paths=ann_paths,
+        annotation_paths=train_ann_paths,
         label2id=label2id,
-        output_jsonpath=args.output,
-        extract_num_from_imgid=True
+        output_jsonpath=os.path.join(args.output, args.output_prefix + 'train.json'),
+        output_root_path=args.output_root_path,
+        extract_num_from_imgid=True,
     )
-
+    convert_xmls_to_cocojson(
+        annotation_paths=valid_ann_paths,
+        label2id=label2id,
+        output_jsonpath=os.path.join(args.output, args.output_prefix + 'valid.json'),
+        output_root_path=args.output_root_path,
+        extract_num_from_imgid=True,
+    )
 
 if __name__ == '__main__':
     main()
